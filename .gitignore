@@ -1,0 +1,29 @@
+# Data
+data/raw/*.csv
+data/raw/*.zip
+data/processed/*.csv
+data/processed/*.parquet
+data/processed/*.pkl
+
+# Models
+models/*.pkl
+models/*.pt
+models/*.pth
+models/*.h5
+models/*.joblib
+models/*.onnx
+
+# Submissions
+submissions/*.csv
+submissions/*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+.env
+venv/
+env/
+.pytest_cache/
