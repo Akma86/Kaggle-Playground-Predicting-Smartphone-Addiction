@@ -1,0 +1,169 @@
+================================================================================
+LAPORAN BEDAH PUBLIC NOTEBOOKS - KAGGLE PLAYGROUND SERIES S6E8
+PREDICTING SMARTPHONE ADDICTION
+================================================================================
+
+Target Kompetisi   : addicted_label (Biner: 1 = Kecanduan, 0 = Tidak)
+Distribusi Kelas   : 70.9% Positif (1), 29.1% Negatif (0)
+Metrik Evaluasi    : ROC-AUC (Rank-based metric)
+Validasi Standar   : 5-Fold StratifiedKFold (shuffle=True, random_state=42)
+Top Public LB Skor : 0.97099
+
+================================================================================
+1. DAFTAR NOTEBOOK YANG DIPELAJARI
+================================================================================
+
+1. eda-lightgbm.ipynb (oleh kitopl)
+   - Judul / Topik : EDA Bentuk Distribusi, S-Curve, Fenomena Zigzag Artifact, dan Tuning max_bin.
+   - Hasil Skor    : Single Feature AUC 0.865 -> LogReg CV 0.911 -> LightGBM Tuned CV 0.9667 / Public LB 0.9651.
+
+2. s6e8-why-gaming-hours-helps-but-adds-nothing-new.ipynb (oleh Georgy Mamarin)
+   - Judul / Topik : Analisis Kausal Data Sintetis, Budget Constraint, Rekayasa Fitur other_screen, Bahaya Monotone Constraints, dan Dinamika Leaderboard.
+   - Hasil Skor    : Pembedahan mendalam terhadap conditional signal, missingness drift, dan pembongkaran OOF library.
+
+3. s6e8-mix-the-meta-models-then-fix-the-weak-bands.ipynb (oleh Rayk Kretzschmar)
+   - Judul / Topik : Solusi Teratas Leaderboard (Public LB 0.97099), Factorization Machines pada Value Lattice, Meta-Model Mixture, dan Band-Local Corrections.
+   - Hasil Skor    : OOF AUC 0.969721 (unggul di 15/15 fold), Final 3-way Rank Blend Public LB 0.97099.
+
+4. s6e8-addiction-lb-0-97097.ipynb (oleh najiama)
+   - Judul / Topik : 18-Model Weighted Blend & Sumber Prediksi OOF Publik.
+   - Hasil Skor    : Public LB 0.97097 (GBDT + TabM + RealMLP + L2Stack).
+
+5. nomobilephone-nomophobia-optuna-xgb.ipynb (oleh mpwolke)
+   - Judul / Topik : Background Domain Nomophobia & Baseline Sederhana XGBoost Optuna.
+   - Catatan       : Contoh baseline sederhana dan analisis pitfalls (metrik, validasi, imputasi).
+
+================================================================================
+2. TEMUAN DAN INSIGHT MENDALAM DARI SETIAP NOTEBOOK
+================================================================================
+
+--------------------------------------------------------------------------------
+A. NOTEBOOK: eda-lightgbm.ipynb
+--------------------------------------------------------------------------------
+1. Karakteristik Missing Values (MCAR):
+   - Seluruh 12 fitur memiliki missing values antara 4% hingga ~20%.
+   - Uji statistik 2-sample z-test dengan koreksi Bonferroni membuktikan missingness bersifat MCAR (Missing Completely At Random).
+   - Menambahkan fitur boolean missing flag (_isna) terbukti TIDAK memberikan peningkatan (selisih AUC: -0.000003). GBDT menangani NaN secara native lebih baik.
+
+2. Kurva Sigmoid Tajam (Steep S-Curve):
+   - Fitur daily_screen_time_hours, weekend_screen_time, dan social_media_hours memiliki kurva non-linear tajam.
+   - daily_screen_time_hours <= 3.97 jam -> positivity rate ~26.5%.
+   - daily_screen_time_hours >= 9.47 jam -> positivity rate >= 99.5%.
+   - Model linear (Logistic Regression) gagal memodelkan undakan curam ini (CV 0.91148), sedangkan GBDT (LightGBM) mampu membagi ruang secara tangga (CV 0.96349).
+
+3. Penemuan Eksperimental notifications_per_day & app_opens_per_day:
+   - Korelasi linier dengan target hampir nol (-0.012 dan +0.063), grafik 20-quantile binned terlihat datar.
+   - Ablation study: Jika 2 kolom ini dihapus, skor AUC LightGBM anjlok sebesar 0.019!
+   - Melatih model HANYA menggunakan 2 fitur ini menghasilkan AUC 0.82!
+   - Alasan: Ini adalah generator artifact dari data sintetis. Nilai integer tertentu memetakan probabilitas target secara meloncat-loncat (zigzag lookup table), dan 100% nilai unik pada test set ada pada train set (0 nilai baru).
+
+4. Kunci Tuning max_bin:
+   - Menyetel max_bin=2047 menyumbang 2/3 dari seluruh peningkatan hasil tuning hyperparameter (+0.002 dari total +0.0032 boost), karena mempertahankan resolusi bin diskrit zigzag tersebut.
+
+--------------------------------------------------------------------------------
+B. NOTEBOOK: s6e8-why-gaming-hours-helps-but-adds-nothing-new.ipynb
+--------------------------------------------------------------------------------
+1. Paradoks gaming_hours & work_study_hours:
+   - Secara univariat, gaming_hours memiliki AUC ~0.62. Namun dalam 12 sel partisi konstan daily_screen_time dan social_media, conditional AUC gaming_hours runtuh menjadi 0.499 (murni acak/noise).
+
+2. Hukum Batas Alokasi Waktu (Time Budget Constraint):
+   - Di data kompetisi: daily_screen_time_hours >= social_media_hours + gaming_hours + work_study_hours berlaku 100% tanpa pelanggaran pada 859.000+ baris data train & test.
+   - Batasan ini tidak ada di dataset sumber asli (mirror dataset), melainkan diciptakan oleh generator sintetis Kaggle.
+
+3. Kenapa gaming_hours Tetap Membantu Model?
+   - ~50% efeknya: Melakukan imputasi/rekonstruksi implisit pada baris-baris di mana daily_screen_time atau social_media bernilai missing.
+   - ~50% sisanya: Kombinasi linear 4 variabel diagonal yang tidak bisa dihitung oleh pohon keputusan (GBDT) yang membagi ruang secara axis-parallel.
+
+4. Rekayasa Fitur Emas (other_screen):
+   - other_screen = daily_screen_time_hours - (social_media_hours + gaming_hours + work_study_hours)
+   - Fitur residual ini memiliki univariat AUC ~0.76 dan memberikan kenaikan skor paired CV secara konsisten di seluruh fold/seed.
+
+5. Bahaya Monotone Constraints:
+   - Jika social_media ditahan konstan pada 1.0 - 1.5 jam, menaikkan screen time dari 3.5 jam ke 5.5 jam justru MENURUNKAN tingkat kecanduan dari 33% ke 12% (karena waktu dialihkan ke belajar/gaming), sebelum naik lagi di atas 8 jam.
+   - Memaksa monotone constraints pada pohon keputusan justru menurunkan skor CV.
+
+6. Adversarial Validation & Missing Rate Drift:
+   - Terdapat perbedaan missing rate antara train dan test (Adversarial AUC ~0.57). Namun nilai yang teramati (observed values) identik dan pola missing tidak berkorelasi dengan target (AUC ~0.502). Drift ini tidak berbahaya dan tidak memerlukan sample re-weighting.
+
+--------------------------------------------------------------------------------
+C. NOTEBOOK: s6e8-mix-the-meta-models-then-fix-the-weak-bands.ipynb
+--------------------------------------------------------------------------------
+1. Factorization Machines (FM) pada Value Lattice:
+   - Karena nilai fitur berupa discrete lookup keys, target encoding pasangan fitur menghasilkan 1.6 juta kombinasi yang terlalu jarang (sparse).
+   - Diimplementasikan PyTorch Factorization Machine bilinear <v_i, v_j> (k=8..32) dengan embedding vector per nilai unik dan learned vector untuk NaN.
+   - FM menghasilkan korelasi peringkat yang sangat rendah (~0.984 terhadap pack GBDT), memberikan diversitas paling berharga ke dalam ensemble.
+
+2. Mixing Dua Desain Meta-Model (Regime vs Global):
+   - Global Stack: Logistic Regression pada seluruh logit prediksi (C=1.0).
+   - Regime Stack (Riponce's design): Logistic Regression (C=0.03) dengan interaksi is_complete, severe_missing (>=4), dan varians ketidaksepakatan model.
+   - Menggabungkan kedua meta-model dengan bobot percentile rank:
+     Mix = (2/3 * Regime_Rank) + (1/3 * Global_Rank)
+     Hasil: Menang di 15 dari 15 fold validasi dibanding memilih salah satu.
+
+3. Band-Local Factorization Machine (Perbaikan Pita Nilai Lemah):
+   - Prediksi global lemah pada wilayah ketidakpastian tinggi (daily_screen_time di rentang 3-6 jam dan 6-7.8 jam).
+   - Melatih FM khusus hanya pada baris di pita tersebut, lalu melakukan reordering urutan peringkat di dalam pita (tanpa mengubah multiset nilai prediksi dan tanpa menggeser batas global) meningkatkan OOF AUC di 15 dari 15 fold (+0.000027 gain).
+   - Aturan: Band model hanya efektif jika gap performanya terhadap blend utama < 0.015.
+
+4. Final Rank Blend (Public LB 0.97099):
+   - Rata-rata peringkat dari 3 sumber independen:
+     (1) Audited 94-member stack
+     (2) Naji's 0.97097 stack
+     (3) Nikita's model
+
+5. Temuan Negatif yang Menghindari Pemborosan Waktu:
+   - Menggunakan LightGBM sebagai meta-model stacking gagal/overfit (CV 0.96954 vs 0.96966 pada Logistic Regression).
+   - Kalibrasi Isotonik per regime merusak ranking AUC (-0.000080).
+   - Menambah DCN (Deep & Cross Network) layer tidak membantu FM.
+
+--------------------------------------------------------------------------------
+D. NOTEBOOK: s6e8-addiction-lb-0-97097.ipynb
+--------------------------------------------------------------------------------
+1. Kombinasi Arsitektur GBDT dan Deep Learning Tabular:
+   - Menggabungkan model berbasis pohon (XGBoost, LightGBM, CatBoost) dengan arsitektur Deep Learning Tabular (RealMLP, TabM, Lookup-Transformers).
+   - Menggunakan standard 5-Fold frozen split untuk stacking OOF yang jujur dan bebas kebocoran (leak-free).
+
+--------------------------------------------------------------------------------
+E. NOTEBOOK: nomobilephone-nomophobia-optuna-xgb.ipynb
+--------------------------------------------------------------------------------
+1. Konteks Domain:
+   - Nomophobia (NO MObile PHone PhoBIA): kecemasan psikologis ketika terpisah dari smartphone.
+2. Catatan Evaluasi & Kesalahan yang Harus Dihindari:
+   - Jangan gunakan single train/test split (80/20); selalu gunakan Stratified 5-Fold.
+   - Jangan mengisi missing values dengan mean sederhana karena menghancurkan pola diskrit lattice.
+   - Jangan mengoptimasi metrik Accuracy jika metrik evaluasi kompetisi adalah ROC-AUC.
+   - Jangan menyetel scale_pos_weight > 1 jika kelas positif adalah mayoritas (71%).
+
+================================================================================
+3. STRATEGI IMPLEMENTASI DAN REKOMENDASI PIPELINE KITA
+================================================================================
+
+1. VALIDASI LOKAL:
+   - Gunakan StratifiedKFold(5, shuffle=True, random_state=42).
+   - Simpan selalu prediksi Out-Of-Fold (OOF) float64 dan Test Prediction tiap model.
+   - Percayai peningkatan CV paired fold-by-fold, bukan fluktuasi kecil LB publik.
+
+2. REKAYASA FITUR (FEATURE ENGINEERING):
+   - other_screen = daily_screen_time_hours - (social_media_hours + gaming_hours + work_study_hours)
+   - other_frac = other_screen / (daily_screen_time_hours + 0.1)
+   - weekend_ratio = weekend_screen_time / (daily_screen_time_hours + 0.01)
+   - social_ratio = social_media_hours / (daily_screen_time_hours + 0.01)
+   - notif_per_open = notifications_per_day / (app_opens_per_day + 1.0)
+   - Exact-Value Target Encoding (OOF inner-split) pada seluruh fitur numerik diskrit.
+
+3. MODELING & HYPERPARAMETERS:
+   - LightGBM: Set max_bin=2047 atau 4095, learning_rate=0.03, num_leaves=45~255, min_child_samples=100~230.
+   - XGBoost: Exact / Hist tree method dengan max_depth 6-10.
+   - CatBoost: CatBoostClassifier dengan kombinasi kategorikal dan target encoding.
+   - TabM / RealMLP / Factorization Machine: Untuk mendapatkan prediksi yang terdekorrelasi dengan pohon.
+
+4. STACKING & POST-PROCESSING:
+   - Logistic Regression Stack pada logit probabilitas (C=0.03 - 1.0).
+   - Regime Interaction Features (is_complete, missing_count >= 4, disagreement std).
+   - Percentile Rank Averaging (scipy.stats.rankdata / len) untuk menggabungkan model.
+   - Band-local rank adjustments pada daerah rentan ketidakpastian (daily 3-6h dan 6-7.8h).
+
+================================================================================
+File dibuat otomatis pada: 2026-08-14
+Repositori: Kaggle-Playground-Predicting-Smartphone-Addiction
+================================================================================
