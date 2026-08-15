@@ -4,6 +4,14 @@ data/raw/*.zip
 data/processed/*.csv
 data/processed/*.parquet
 data/processed/*.pkl
+data/processed/*.npy
+
+# Submissions
+submissions/*.csv
+submissions/*.zip
+submission.csv
+notebooks/submission.csv
+notebooks/**/*.csv
 
 # Models
 models/*.pkl
@@ -12,17 +20,20 @@ models/*.pth
 models/*.h5
 models/*.joblib
 models/*.onnx
+models/*.npy
 
-# Submissions
-submissions/*.csv
-submissions/*.zip
+# CatBoost & Logs
+catboost_info/
+**/catboost_info/
+*.log
 
-# Python
+# Python & Jupyter
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .ipynb_checkpoints/
+**/.ipynb_checkpoints/
 .env
 venv/
 env/
